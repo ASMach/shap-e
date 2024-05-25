@@ -27,6 +27,54 @@ def uncond_guide_model(
 
     return model_fn
 
+def sample_helper(
+    batch_size: int,
+    model: nn.Module,
+    diffusion: GaussianDiffusion,
+    model_kwargs: Dict[str, Any],
+    guidance_scale: float,
+    clip_denoised: bool,
+    use_fp16: bool,
+    use_karras: bool,
+    karras_steps: int,
+    sigma_min: float,
+    sigma_max: float,
+    s_churn: float,
+    device: Optional[torch.device] = None,
+    progress: bool = False,
+    sample_shape: 'tuple[int, Any]' = (1, 3, 256, 256)
+) -> torch.Tensor:
+    samples = None
+    if use_karras:
+        samples = karras_sample(
+            diffusion=diffusion,
+            model=model,
+            shape=sample_shape,
+            steps=karras_steps,
+            clip_denoised=clip_denoised,
+            model_kwargs=model_kwargs,
+            device=device,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            s_churn=s_churn,
+            guidance_scale=guidance_scale,
+            progress=progress,
+        )
+    else:
+        internal_batch_size = batch_size
+        if guidance_scale != 1.0:
+            model = uncond_guide_model(model, guidance_scale)
+            internal_batch_size *= 2
+        samples = diffusion.p_sample_loop(
+            model,
+            shape=(internal_batch_size, *sample_shape[1:]),
+            model_kwargs=model_kwargs,
+            device=device,
+            clip_denoised=clip_denoised,
+            progress=progress,
+        )
+    return samples
+
 
 def sample_latents(
     *,
@@ -57,34 +105,38 @@ def sample_latents(
             model_kwargs[k] = torch.cat([v, torch.zeros_like(v)], dim=0)
 
     sample_shape = (batch_size, model.d_latent)
-    with torch.autocast(device_type=device.type, enabled=use_fp16):
-        if use_karras:
-            samples = karras_sample(
-                diffusion=diffusion,
-                model=model,
-                shape=sample_shape,
-                steps=karras_steps,
-                clip_denoised=clip_denoised,
-                model_kwargs=model_kwargs,
-                device=device,
-                sigma_min=sigma_min,
-                sigma_max=sigma_max,
-                s_churn=s_churn,
-                guidance_scale=guidance_scale,
-                progress=progress,
-            )
-        else:
-            internal_batch_size = batch_size
-            if guidance_scale != 1.0:
-                model = uncond_guide_model(model, guidance_scale)
-                internal_batch_size *= 2
-            samples = diffusion.p_sample_loop(
-                model,
-                shape=(internal_batch_size, *sample_shape[1:]),
-                model_kwargs=model_kwargs,
-                device=device,
-                clip_denoised=clip_denoised,
-                progress=progress,
-            )
-
-    return samples
+    print(device)
+    if not torch.backends.mps.is_available():
+        print(device)
+        with torch.autocast(device_type=device.type, enabled=use_fp16):
+            return sample_helper(batch_size,
+                                 model,
+                                 diffusion,
+                                 model_kwargs,
+                                 guidance_scale,
+                                 clip_denoised,
+                                 use_fp16,
+                                 use_karras,
+                                 karras_steps,
+                                 sigma_min,
+                                 sigma_max,
+                                 s_churn,
+                                 device,
+                                 progress,
+                                 sample_shape)
+    else:
+        return sample_helper(batch_size,
+                                 model,
+                                 diffusion,
+                                 model_kwargs,
+                                 guidance_scale,
+                                 clip_denoised,
+                                 use_fp16,
+                                 use_karras,
+                                 karras_steps,
+                                 sigma_min,
+                                 sigma_max,
+                                 s_churn,
+                                 device,
+                                 progress,
+                                 sample_shape)
