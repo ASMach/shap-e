@@ -1068,6 +1068,8 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
 
     res = None
 
+    # If we are running on Apple Silicon, we need to convert
+    # the numpy array from float64 to float32 to avoid a crash.
     if th.backends.mps.is_available():
         res = th.from_numpy(arr.astype(np.float32)).to(device=timesteps.device)[timesteps].float()
     else:

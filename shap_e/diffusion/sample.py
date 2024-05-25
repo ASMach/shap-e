@@ -105,9 +105,9 @@ def sample_latents(
             model_kwargs[k] = torch.cat([v, torch.zeros_like(v)], dim=0)
 
     sample_shape = (batch_size, model.d_latent)
-    print(device)
+    
+    # Only autocast if MPS is not available to avoid a crash
     if not torch.backends.mps.is_available():
-        print(device)
         with torch.autocast(device_type=device.type, enabled=use_fp16):
             return sample_helper(batch_size,
                                  model,
