@@ -190,7 +190,8 @@ def render_views_from_stf(
         raw_density = None
         if "density" in sdf_out:
             raw_density = sdf_out.density
-        with torch.autocast(device_type, enabled=False):
+            
+        def mask_helper():
             fields = sdf_out.signed_distance.float()
             raw_signed_distance = sdf_out.signed_distance
             assert (
@@ -231,7 +232,13 @@ def render_views_from_stf(
                     mesh_mask.append(True)
                 raw_meshes.append(raw_mesh)
             mesh_mask = torch.tensor(mesh_mask, device=device)
-
+            
+        if device_type == "mps":
+            with torch.no_grad():
+                mask_helper()
+        else:
+            with torch.autocast(device_type, enabled=False):
+                mask_helper()
         max_vertices = max(len(m.verts) for m in raw_meshes)
 
         fn = nerstf_fn if tf_fn is None else tf_fn
@@ -257,7 +264,7 @@ def render_views_from_stf(
         tf_out.channels = _convert_srgb_to_linear(tf_out.channels)
 
     # Make sure the raw meshes have colors.
-    with torch.autocast(device_type, enabled=False):
+    def mesh_color_helper():
         textures = tf_out.channels.float()
         assert len(textures.shape) == 3 and textures.shape[-1] == len(
             texture_channels
@@ -265,6 +272,12 @@ def render_views_from_stf(
         for m, texture in zip(raw_meshes, textures):
             texture = texture[: len(m.verts)]
             m.vertex_channels = {name: ch for name, ch in zip(texture_channels, texture.unbind(-1))}
+    if device_type == "mps":
+        with torch.no_grad():
+            mesh_color_helper()
+    else:
+        with torch.autocast(device_type, enabled=False):
+            mesh_color_helper()
 
     args = dict(
         options=options,
